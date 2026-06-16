@@ -18,4 +18,4 @@ matrixx_upload.log
 # Optional: editor configs
 .vscode/
 .idea/
-.json
+*.json

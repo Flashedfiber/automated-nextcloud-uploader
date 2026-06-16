@@ -8,12 +8,6 @@ NC_URL="https://files.dataheaven.space"
 BASE_DIR="Uploads"
 DRY_RUN=0
 
-# ─────────────────────────────────────────────
-# Static OTA Variables
-# ─────────────────────────────────────────────
-MAINTAINER="flashedfiber"
-OEM="oneplus"
-
 set -euo pipefail
 
 # ─────────────────────────────────────────────
@@ -38,12 +32,6 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # ─────────────────────────────────────────────
-# Setup JSON Directory
-# ─────────────────────────────────────────────
-JSON_DIR="${SCRIPT_DIR}/ota_jsons"
-mkdir -p "$JSON_DIR"
-
-# ─────────────────────────────────────────────
 # Simple Banner
 # ─────────────────────────────────────────────
 RESET="\033[0m"
@@ -60,6 +48,7 @@ _nc_banner() {
     echo -e "${GREEN}${BOLD}========================================${RESET}"
     echo ""
     echo -e "${GRAY}Server:${RESET} ${CYAN}${NC_URL}${RESET}"
+    echo -e "${GRAY}Default Dir:${RESET} ${CYAN}${BASE_DIR}${RESET}"
 
     if [[ -n "${NC_USER:-}" ]]; then
         echo -e "${GRAY}User:${RESET} ${CYAN}${NC_USER}${RESET}"
@@ -78,6 +67,7 @@ if [[ -z "${NC_USER:-}" || -z "${NC_PASS:-}" ]]; then
     exit 1
 fi
 
+_nc_banner
 WEBDAV_ROOT="${NC_URL}/remote.php/dav/files/${NC_USER}"
 LOG_FILE="${SCRIPT_DIR}/nc_upload.log"
 
@@ -90,6 +80,7 @@ log_action() {
 # ─────────────────────────────────────────────
 cache_init() {
     echo '{"response": []}' > "$1"
+    echo "⚠️ Initialized fresh OTA cache: $1"
 }
 
 cache_add() {
@@ -112,12 +103,12 @@ cache_add() {
     ENTRY=$(jq -n \
         --arg filename "$FILENAME" --arg download "$LINK" --arg timestamp "$TIMESTAMP_EPOCH" \
         --arg md5 "$MD5" --arg sha256 "$SHA256" --arg size "$SIZE_BYTES" --arg device "$DEVICE" \
-        --arg maintainer "$MAINTAINER" --arg oem "$OEM" \
-        '{ maintainer: $maintainer, oem: $oem, device: $device, filename: $filename, download: $download, timestamp: ($timestamp | tonumber), md5: $md5, sha256: $sha256, size: ($size | tonumber), version: "", buildtype: "", forum: "", gapps: "", firmware: "", modem: "", bootloader: "", recovery: "", paypal: "", telegram: "", dt: "", "common-dt": "", kernel: "" }')
+        '{ maintainer: "flashedfiber", oem: "oneplus", device: $device, filename: $filename, download: $download, timestamp: ($timestamp | tonumber), md5: $md5, sha256: $sha256, size: ($size | tonumber), version: "", buildtype: "", forum: "", gapps: "", firmware: "", modem: "", bootloader: "", recovery: "", paypal: "", telegram: "", dt: "", "common-dt": "", kernel: "" }')
 
     local TMP
     TMP=$(mktemp)
     jq --argjson entry "$ENTRY" '.response += [$entry]' "$CACHE_FILE" > "$TMP" && mv "$TMP" "$CACHE_FILE"
+    echo "✅ Cached to ${CACHE_FILE}"
 }
 
 propfind_status() {
@@ -191,80 +182,48 @@ do_upload() {
 }
 
 # ─────────────────────────────────────────────
-# Interactive Upload Command
+# Unattended/Automated Upload (No Interactivity)
 # ─────────────────────────────────────────────
-interactive_upload() {
-    local FILE="$1"
-    
+auto_upload_file() {
+    local FILE="$1" TARGET_PATH="$2" DEVICE="$3"
+
     if [[ ! -f "$FILE" ]]; then
         echo "❌ File not found: $FILE" >&2
         exit 1
     fi
 
-    _nc_banner
-    
-    echo "📦 Target File: $(basename "$FILE")"
-    echo "─────────────────────────────────────────"
-    
-    # Ask the user where to upload it
-    read -rp "📂 Enter Nextcloud destination folder (e.g., Builds/Matrixx/asteroids): " TARGET_PATH
-    
-    # If they just press enter, default to the BASE_DIR
-    if [[ -z "$TARGET_PATH" ]]; then
-        TARGET_PATH="$BASE_DIR"
-    fi
-
-    # Strip leading/trailing slashes to prevent WebDAV errors
-    TARGET_PATH=$(echo "$TARGET_PATH" | sed 's|^/||; s|/$||')
-
-    echo "⚙️ Verifying/Creating directories for: $TARGET_PATH"
-    ensure_dir "$TARGET_PATH"
-
     local FILENAME
     FILENAME="$(basename "$FILE")"
     local TARGET="${WEBDAV_ROOT}/${TARGET_PATH}/${FILENAME}"
-    local DEVICE
-    DEVICE="$(basename "$TARGET_PATH")"
+
+    echo "⚙️ Automated run execution initiated..." >&2
+    ensure_dir "$TARGET_PATH"
 
     if [[ $DRY_RUN -eq 1 ]]; then
         echo "[DRY-RUN] Auto-upload target: ${FILENAME} → ${TARGET_PATH}" >&2
         return 0
     fi
 
-    echo "🚀 Uploading..."
     local HTTP
     HTTP=$(do_upload "$TARGET" "$FILE")
     
     if [[ "$(propfind_status "${TARGET_PATH}/${FILENAME}")" == "207" ]]; then
-        log_action "UPLOAD" "${TARGET_PATH}/${FILENAME}" "SUCCESS"
+        log_action "AUTO_UPLOAD" "${TARGET_PATH}/${FILENAME}" "SUCCESS"
         local LINK
         LINK=$(get_download_link "${TARGET_PATH}/${FILENAME}")
 
         if [[ -n "$LINK" ]]; then
-            echo "─────────────────────────────────────────"
-            echo "✅ ALL DONE! Download Link:"
-            echo "🔗 $LINK"
-            
-            # ─────────────────────────────────────────────
-            # Generate Timestamped JSON File
-            # ─────────────────────────────────────────────
-            local TIME_STAMP
-            TIME_STAMP=$(date +%Y%m%d_%H%M%S)
-            local CACHE_FILE="${JSON_DIR}/${DEVICE}_${TIME_STAMP}.json"
-            
-            cache_init "$CACHE_FILE" >/dev/null
-            cache_add "$FILE" "$TARGET_PATH" "$LINK" "$CACHE_FILE" "$DEVICE" >/dev/null
-            
-            echo "📄 OTA JSON saved to:"
-            echo "   $CACHE_FILE"
-            echo "─────────────────────────────────────────"
+            echo "🔗 DOWNLOAD_URL: ${LINK}"
         else
             echo "❌ Share Link Generation Failed" >&2
             exit 1
         fi
 
+        local CACHE_FILE="${SCRIPT_DIR}/${DEVICE}.json"
+        cache_init "$CACHE_FILE" >/dev/null
+        cache_add "$FILE" "$TARGET_PATH" "$LINK" "$CACHE_FILE" "$DEVICE" >/dev/null
     else
-        log_action "UPLOAD" "${TARGET_PATH}/${FILENAME}" "FAILED ($HTTP)"
+        log_action "AUTO_UPLOAD" "${TARGET_PATH}/${FILENAME}" "FAILED ($HTTP)"
         echo "❌ Remote upload verification failed (HTTP $HTTP)" >&2
         exit 1
     fi
@@ -284,21 +243,22 @@ CMD="${1:-}"
 
 show_help() {
     echo -e "\n❌ Invalid or incomplete command\n\n👉 Available commands:\n"
-    echo -e "  Upload:\n    ./nc.sh upload <file>\n"
+    echo -e "  Upload (Interactive):\n    ./nc.sh upload <file>\n"
+    echo -e "  Auto-Upload (Unattended/CI):\n    ./nc.sh auto-upload <file> [target_path] [device_codename]\n"
+    echo -e "  List / Delete / Move:\n    ./nc.sh list <path>\n    ./nc.sh delete <path>\n    ./nc.sh move <old> <new>\n"
 }
 
 case "$CMD" in
-    upload)
+    auto-upload)
         shift
         if [[ -z "${1:-}" ]]; then
-            echo "❌ Missing file."
+            echo "❌ Missing parameters."
             show_help
             exit 1
         fi
-        interactive_upload "$1"
+        auto_upload_file "$1" "${2:-$BASE_DIR}" "${3:-$(basename "${2:-$BASE_DIR}")}"
         ;;
     *)
         show_help
         ;;
 esac
-
