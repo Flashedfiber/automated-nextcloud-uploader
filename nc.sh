@@ -56,7 +56,7 @@ YELLOW="\033[38;5;220m"
 _nc_banner() {
     echo ""
     echo -e "${GREEN}${BOLD}========================================${RESET}"
-    echo -e "${GREEN}${BOLD}      🚀 Nextcloud CLI Uploader 🚀       ${RESET}"
+    echo -e "${GREEN}${BOLD}     🚀 Nextcloud CLI Uploader 🚀       ${RESET}"
     echo -e "${GREEN}${BOLD}========================================${RESET}"
     echo ""
     echo -e "${GRAY}Server:${RESET} ${CYAN}${NC_URL}${RESET}"
@@ -93,7 +93,7 @@ cache_init() {
 }
 
 cache_add() {
-    local FILE="$1" TARGET_PATH="$2" LINK="$3" CACHE_FILE="$4" DEVICE="$5"
+    local FILE="$1" LINK="$2" CACHE_FILE="$3" DEVICE="$4" VERSION="$5" NOTE="$6"
     local FILENAME SIZE_BYTES TIMESTAMP_EPOCH MD5 SHA256
 
     FILENAME="$(basename "$FILE")"
@@ -112,8 +112,8 @@ cache_add() {
     ENTRY=$(jq -n \
         --arg filename "$FILENAME" --arg download "$LINK" --arg timestamp "$TIMESTAMP_EPOCH" \
         --arg md5 "$MD5" --arg sha256 "$SHA256" --arg size "$SIZE_BYTES" --arg device "$DEVICE" \
-        --arg maintainer "$MAINTAINER" --arg oem "$OEM" \
-        '{ maintainer: $maintainer, oem: $oem, device: $device, filename: $filename, download: $download, timestamp: ($timestamp | tonumber), md5: $md5, sha256: $sha256, size: ($size | tonumber), version: "", buildtype: "", forum: "", gapps: "", firmware: "", modem: "", bootloader: "", recovery: "", paypal: "", telegram: "", dt: "", "common-dt": "", kernel: "" }')
+        --arg maintainer "$MAINTAINER" --arg oem "$OEM" --arg version "$VERSION" --arg note "$NOTE" \
+        '{ maintainer: $maintainer, oem: $oem, device: $device, filename: $filename, download: $download, timestamp: ($timestamp | tonumber), md5: $md5, sha256: $sha256, size: ($size | tonumber), version: $version, note: $note }')
 
     local TMP
     TMP=$(mktemp)
@@ -206,16 +206,21 @@ interactive_upload() {
     echo "📦 Target File: $(basename "$FILE")"
     echo "─────────────────────────────────────────"
     
-    # Ask the user where to upload it
+    # 1. Ask for Target Path
     read -rp "📂 Enter Nextcloud destination folder (e.g., Builds/Matrixx/asteroids): " TARGET_PATH
-    
-    # If they just press enter, default to the BASE_DIR
     if [[ -z "$TARGET_PATH" ]]; then
         TARGET_PATH="$BASE_DIR"
     fi
-
-    # Strip leading/trailing slashes to prevent WebDAV errors
     TARGET_PATH=$(echo "$TARGET_PATH" | sed 's|^/||; s|/$||')
+
+    # 2. Ask for ROM Version
+    read -rp "🏷 Enter ROM Version (e.g., 14.0-Official): " ROM_VERSION
+    if [[ -z "$ROM_VERSION" ]]; then
+        ROM_VERSION="—"
+    fi
+
+    # 3. Ask for Custom Note
+    read -rp "⚠️ Enter custom note for Telegram (Leave empty for none): " ROM_NOTE
 
     echo "⚙️ Verifying/Creating directories for: $TARGET_PATH"
     ensure_dir "$TARGET_PATH"
@@ -253,7 +258,7 @@ interactive_upload() {
             local CACHE_FILE="${JSON_DIR}/${DEVICE}_${TIME_STAMP}.json"
             
             cache_init "$CACHE_FILE" >/dev/null
-            cache_add "$FILE" "$TARGET_PATH" "$LINK" "$CACHE_FILE" "$DEVICE" >/dev/null
+            cache_add "$FILE" "$LINK" "$CACHE_FILE" "$DEVICE" "$ROM_VERSION" "$ROM_NOTE" >/dev/null
             
             echo "📄 OTA JSON saved to:"
             echo "   $CACHE_FILE"
@@ -301,4 +306,3 @@ case "$CMD" in
         show_help
         ;;
 esac
-
